@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Henry Sweat</title>
+<meta name="description" content="I write software that makes customer service suck less for tens of millions of people.">
+<meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7; --fg: #1a1a1a; --rec: #5d5952; --dim: #77736b;
+    --col: 31rem;
+    --gutter: max(24px, env(safe-area-inset-left), env(safe-area-inset-right));
+    --top: clamp(28px, 9vh, 96px);
+  }
+  @media (min-width: 700px) { :root { --gutter: clamp(24px, 14vw, 220px); --top: clamp(48px, 20vh, 200px); } }
+  @media (prefers-color-scheme: dark) { :root { --bg: #141413; --fg: #e9e6df; --rec: #aba79e; --dim: #8a867d; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body { background: var(--bg); color: var(--fg); font: 18px/1.55 "Iowan Old Style", Charter, Georgia, "Times New Roman", serif; }
+
+  main { max-width: calc(var(--col) + 2 * var(--gutter)); padding: var(--top) var(--gutter) 96px; }
+  /* the whole introduction is one plain sentence */
+  h1 { font: inherit; font-size: clamp(21px, 2.4vw, 28px); line-height: 1.3; text-wrap: balance; margin: 0 0 1em; }
+  p { margin: 0 0 1em; }
+  a { color: inherit; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+  /* the phone menu */
+  #ivr { margin-top: 2.2em; }
+  #ivr > * { opacity: 0; transform: translateY(4px); transition: opacity .35s ease, transform .35s ease; }
+  #ivr > .in { opacity: 1; transform: none; }
+  #ivr p { margin: 0 0 .5em; color: var(--rec); }                 /* the recording speaks a shade quieter than Henry */
+  #ivr p.human { margin: 1.1em 0 .9em; color: var(--fg); font-size: 1.15em; line-height: 1.4; }
+  #ivr p.timer { margin-top: 1em; font: 14px/1.4 system-ui, sans-serif; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #ivr .opt {
+    display: block; margin: 0; padding: 8px 0; background: none; border: 0; cursor: pointer;
+    font: inherit; color: inherit; text-align: left; text-underline-offset: 3px;
+  }
+  #ivr .opt:hover, #ivr .opt:focus-visible { text-decoration: underline; }
+  #ivr p + .opt { margin-top: .6em; }
+  #ivr kbd {
+    display: inline-block; min-width: 1.7em; margin: 0 .1em; padding: 0 .4em;
+    border: 1px solid color-mix(in srgb, currentColor 40%, transparent); border-bottom-width: 2px; border-radius: 5px;
+    font: 600 .78em/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-align: center; vertical-align: .08em;
+  }
+  @media (prefers-reduced-motion: reduce) { #ivr > * { transition: none; transform: none; } }
+
+  /* the way out and the mute switch share the bottom edge of the column */
+  .foot {
+    position: fixed; left: var(--gutter); bottom: max(18px, env(safe-area-inset-bottom));
+    width: min(var(--col), 100% - 2 * var(--gutter));
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 16px;
+    font: 14px/1.4 system-ui, sans-serif; color: var(--dim);
+  }
+  .skip { margin: 0; }
+  #mute { font: inherit; color: inherit; background: none; border: 0; padding: 6px 0; margin: -6px 0; cursor: pointer; visibility: hidden; }
+  #mute.on { visibility: visible; }
+  #mute:hover, .skip a:hover { color: var(--fg); }
+  /* the way out only appears once the main menu has finished reading itself out */
+  .skip { visibility: hidden; opacity: 0; transition: opacity .8s ease .4s, visibility 0s .4s; }
+  body.called .skip { visibility: visible; opacity: 1; }
+  @media (max-width: 480px) { .skip .label { display: block; } }   /* label on its own line instead of a ragged wrap */
+</style>
+</head>
+<body>
+
+<main>
+  <h1>I'm Henry Sweat. I write software that makes customer service suck less for tens of millions of people.</h1>
+  <div id="ivr" aria-live="polite"></div>
+</main>
+
+<div class="foot">
+  <p class="skip"><span class="label">Skip the queue:</span> <a id="email" href="#"></a> · <a id="gh" target="_blank" rel="noopener">GitHub</a><span id="liWrap"> · <a id="li" target="_blank" rel="noopener">LinkedIn</a></span></p>
+  <button id="mute" aria-pressed="false">mute</button>
+</div>
+
+<script>
+(() => {
+  /* ============ CONFIG ============ */
+  const EMAIL = 'hi@henrysweat.com';
+  const GITHUB_URL = 'https://github.com/henry-sweat';
+  const LINKEDIN_URL = 'https://www.linkedin.com/in/henry-sweat/';   // leave empty to hide the link
+  const MUSIC_SRC = 'elevator.mp3';
+  const MUSIC_LOOP_SECONDS = 1512000 / 44100;
+  const MUSIC_VOLUME = 0.3;          // the track is mastered loud; this puts it well under a normal song
+  const MUSIC_START_S = 2;           // fade-in on the first press, so it never arrives all at once
+  const LINE_MS = 1300;              // shortest pause after a spoken line
+  const CHAR_MS = 30;                // longer lines hold the floor longer, like a recording reading them out
+  const BEAT_MS = 1400;              // extra silence after the recording's last line before Henry answers
+  const FADE_IN_S = 1.5;             // music easing back in after Henry's reply
+  const SKIP_FADE_S = 0.8;           // music fade when the visitor skips straight to the reply
+  const linePause = (text) => Math.max(LINE_MS, 500 + CHAR_MS * text.length);
+  const HOLD_MS = 7000;              // how long each stretch of holding lasts
+
+  const $ = (id) => document.getElementById(id);
+  $('email').textContent = EMAIL;
+  $('email').href = 'mailto:' + EMAIL;
+  $('gh').href = GITHUB_URL;
+  if (LINKEDIN_URL) $('li').href = LINKEDIN_URL; else $('liWrap').remove();
+
+  /* ============ HOLD MUSIC (gapless loop; starts with the first key press) ============ */
+  const music = (() => {
+    let ctx, gain, buffer, source, fallback, muted = false, started = false, armed = false;
+
+    // iOS: play through the silent switch like a media player would
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+
+    // Create the context right away (it starts suspended) so a tap can
+    // unlock it even while the MP3 is still downloading.
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      gain = ctx.createGain();
+      gain.gain.value = 0;
+      gain.connect(ctx.destination);
+      ctx.onstatechange = () => tryStart();
+    } catch { ctx = null; }
+
+    async function load() {
+      try {
+        if (!ctx) throw new Error('no web audio');
+        const res = await fetch(MUSIC_SRC);
+        if (!res.ok) throw new Error(res.status);
+        const data = await res.arrayBuffer();
+        buffer = await new Promise((ok, bad) => ctx.decodeAudioData(data, ok, bad));
+      } catch {
+        // file:// pages can't fetch; fall back to a plain looping <audio>
+        ctx = null;
+        fallback = new Audio(MUSIC_SRC);
+        fallback.loop = true;
+        fallback.volume = 0;
+      }
+      tryStart();
+    }
+
+    // Called synchronously inside a user gesture.
+    function unlock() {
+      if (hidden) return;
+      if (started) {                 // a tap also revives sound iOS paused on its own
+        if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+        if (fallback && fallback.paused) fallback.play().catch(() => {});
+        return;
+      }
+      if (ctx) {
+        ctx.resume().catch(() => {});
+        // older iOS also wants a sound started inside the gesture
+        const s = ctx.createBufferSource();
+        s.buffer = ctx.createBuffer(1, 1, 22050);
+        s.connect(ctx.destination);
+        s.start(0);
+      }
+      tryStart();
+    }
+
+    function tryStart() {
+      if (!armed || started || hidden) return;
+      if (ctx && buffer) {
+        if (ctx.state !== 'running') { ctx.resume().catch(() => {}); return; }
+        started = true;
+        api.onStart();
+        source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        source.loopStart = 0;
+        source.loopEnd = Math.min(buffer.duration, MUSIC_LOOP_SECONDS);
+        source.connect(gain);
+        source.start();
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(muted ? 0 : MUSIC_VOLUME, ctx.currentTime + MUSIC_START_S);
+      } else if (fallback) {
+        fallback.play().then(() => {
+          if (started) return;
+          started = true;
+          api.onStart();
+          let v = 0;
+          const up = setInterval(() => {
+            v = Math.min(MUSIC_VOLUME, v + 0.02);
+            if (!muted) fallback.volume = v;
+            if (v >= MUSIC_VOLUME) clearInterval(up);
+          }, 90);
+        }).catch(() => {});
+      }
+    }
+
+    // Pause when the page is hidden (app switched, tab changed, phone locked)
+    // so the music doesn't keep playing in the background; pick up on return.
+    let hidden = document.hidden;
+    function pauseAll() {
+      hidden = true;
+      if (!started) return;
+      if (ctx) ctx.suspend().catch(() => {});
+      if (fallback) fallback.pause();
+    }
+    function resumeAll() {
+      hidden = false;
+      if (!started) return tryStart();
+      if (ctx) ctx.resume().catch(() => {});
+      if (fallback) fallback.play().catch(() => {});
+    }
+    document.addEventListener('visibilitychange', () => document.hidden ? pauseAll() : resumeAll());
+    addEventListener('pagehide', pauseAll);
+    addEventListener('pageshow', () => { if (!document.hidden) resumeAll(); });
+
+    // secs is roughly how long the fade takes: short for the mute button,
+    // long when the music trails off ahead of Henry's reply.
+    let fadeTimer = 0;
+    function setMuted(m, secs = 0.3) {
+      muted = m;
+      const target = m ? 0 : MUSIC_VOLUME;
+      if (ctx && gain) {
+        // drop any fade still in progress so it can't override this one
+        const g = gain.gain, now = ctx.currentTime;
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(g.value, now);
+        g.setTargetAtTime(target, now, secs / 4);          // an exponential fade is ~done after 4 time constants
+      }
+      if (fallback && started) {
+        clearInterval(fadeTimer);
+        const from = fallback.volume, t0 = performance.now();
+        fadeTimer = setInterval(() => {
+          const k = Math.min(1, (performance.now() - t0) / (secs * 1000));
+          fallback.volume = from + (target - from) * k;
+          if (k >= 1) clearInterval(fadeTimer);
+        }, 50);
+      }
+    }
+    const api = { load, unlock, arm() { armed = true; tryStart(); }, setMuted, onStart() {}, get started() { return started; } };
+    return api;
+  })();
+
+  music.load();
+  for (const ev of ['touchend', 'pointerup', 'mousedown', 'click', 'keydown']) {
+    addEventListener(ev, () => music.unlock(), { capture: true, passive: true });
+  }
+
+  const muteBtn = $('mute');
+  let userMuted = false;
+  const showMute = () => {
+    muteBtn.classList.toggle('on', music.started);
+    muteBtn.textContent = userMuted ? 'unmute' : 'mute';
+    muteBtn.setAttribute('aria-pressed', userMuted);
+  };
+  music.onStart = showMute;
+  muteBtn.addEventListener('click', () => {
+    userMuted = !userMuted;
+    music.setMuted(userMuted || quiet);
+    showMute();
+  });
+
+  /* ============ THE PHONE MENU ============ */
+  // Each node returns { lines, options: [[text, next, key?]], auto: [next, ms] }.
+  // "{n}" in an option is replaced by the key that selects it. Nothing here
+  // "timer" shows a running hold clock. "human" is Henry's own reply (strings
+  // and links); the hold music fades out while he talks. Every fork plays its
+  // joke first and then ends with the real thing it was asked for.
+  const state = { loops: 0, wait: 4, holdStart: null };
+  const waitTime = () => {
+    const w = state.wait;
+    state.wait += 3 + state.loops * 2 + Math.floor(Math.random() * 4);
+    return w;
+  };
+  const MENU = ['To return to the main menu, press {n}.', 'back'];
+  const TRANSFER = 'Transferring you to the next available Henry.';
+  const link = (text, href, blank) => {
+    const a = document.createElement('a');
+    a.textContent = text;
+    a.href = href;
+    if (blank) { a.target = '_blank'; a.rel = 'noopener'; }
+    return a;
+  };
+  const hold = (next) => ({ timer: true, options: [['To continue holding, press {n}.', next]], auto: [next, HOLD_MS] });
+
+  const NODES = {
+    start: () => ({ lines: [], options: [['To get in touch, press {n}.', 'welcome']] }),
+
+    welcome: () => ({ ...NODES.main(), lines: [
+      'Thank you for visiting Henry Sweat.',
+      'Your visit is important to us.',
+      'Please listen carefully, as our menu options have recently changed.',
+    ] }),
+
+    main: () => {
+      const opts = [
+        ['For email, press {n}.', 'hold1'],
+        ['For GitHub, press {n}.', 'github'],
+        ['For LinkedIn, press {n}.', 'linkedin'],
+        ['To speak to Henry, press {n}.', 'rep'],
+        ['To hear these options again, press {n}.', 'again'],
+      ];
+      const r = state.loops % opts.length;               // the options really do change
+      return { lines: ['Main menu.'], options: opts.slice(r).concat(opts.slice(0, r)) };
+    },
+
+    again: () => {
+      state.loops++;
+      return { ...NODES.main(), lines: ['Please listen carefully, as our menu options have recently changed.'] };
+    },
+
+    back: () => {
+      state.loops++;
+      return { lines: ['Returning to the main menu.'], auto: ['main', 1800] };
+    },
+
+    hold1: () => ({ ...hold('hold2'), lines: [
+      'Thank you.',
+      'All of our Henrys are currently assisting other visitors.',
+      `Your estimated wait time is ${waitTime()} minutes.`,
+      'Please hold.',
+    ] }),
+    hold2: () => ({ ...hold('hold3'), lines: [
+      'Thank you for continuing to hold.',
+      'Your visit is important to us.',
+      `Your estimated wait time is ${waitTime()} minutes.`,
+    ] }),
+    hold3: () => ({ ...hold('pickup'), lines: [
+      'Did you know? Most questions can be answered on our website.',
+      'You are on our website.',
+    ] }),
+    // the payoff: someone actually picks up
+    pickup: () => ({
+      lines: ['Thank you for holding.', 'Connecting you to Henry.'],
+      human: ['Hey there. Sorry about the wait. The fastest way to reach me is ', link(EMAIL, 'mailto:' + EMAIL), '.'],
+      options: [['To go back on hold, press {n}.', 'back']],
+    }),
+
+    // always closed: out of hours it's closed, in hours it's at lunch
+    github: () => {
+      const now = new Date(), day = now.getDay(), hr = now.getHours();
+      const open = day >= 1 && day <= 5 && hr >= 9 && hr < 17;
+      const time = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const weekday = now.toLocaleDateString([], { weekday: 'long' });
+      return { lines: [
+        'Our GitHub department is open Monday through Friday, 9 a.m. to 5 p.m.',
+        `It is currently ${time} on a ${weekday}.`,
+        open ? 'We are at lunch.' : 'We are closed.',
+      ],
+      human: ['You can let yourself in: ', link(GITHUB_URL.replace(/^https?:\/\/(www\.)?/, ''), GITHUB_URL, true), '.'],
+      options: [MENU] };
+    },
+
+    linkedin: () => ({ lines: [
+      'Your connection request has been placed on hold.',
+      'As a courtesy, Henry has endorsed you for Holding.',
+    ], ...(LINKEDIN_URL
+      ? { human: ['Happy to endorse you for something better on ', link('LinkedIn', LINKEDIN_URL, true), '.'], options: [MENU] }
+      : { auto: ['back', 2600] }) }),
+
+    rep: () => ({
+      lines: ['To speak to Henry, please say “representative.”'],
+      options: [['To say “representative,” press {n}.', 'rep2']],
+    }),
+    rep2: () => ({
+      lines: ['I’m sorry, I didn’t catch that.', 'Did you say “refrigerator”?'],
+      options: [['For yes, press {n}.', 'fridge'], ['For no, press {n}.', 'rep3']],
+    }),
+    // both answers end up in the same queue, and the queue gets answered
+    rep3: () => ({ lines: ['I’m sorry, I didn’t catch that.', TRANSFER], auto: ['hold1', 2200] }),
+    fridge: () => ({ lines: ['Henry does not service refrigerators.', TRANSFER], auto: ['hold1', 2200] }),
+  };
+
+  const ivr = $('ivr');
+  let token = 0, keys = new Map(), finish = null, quiet = false;
+
+  const setQuiet = (q, secs) => {
+    if (q === quiet) return;
+    quiet = q;
+    music.setMuted(userMuted || quiet, secs);
+  };
+  const clock = () => {
+    const s = Math.floor((Date.now() - state.holdStart) / 1000);
+    return `On hold · ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  function go(name, pressed) {
+    const my = ++token;
+    const node = NODES[name](pressed);
+    keys = new Map();
+
+    const els = (node.lines || []).map((text) => {
+      const p = document.createElement('p');
+      p.textContent = text;
+      return p;
+    });
+
+    setQuiet(false, FADE_IN_S);                           // the recording always has music under it
+    if (node.timer) {                                     // one clock runs across the whole hold
+      state.holdStart ??= Date.now();
+      const t = document.createElement('p');
+      t.className = 'timer';
+      t.setAttribute('aria-hidden', 'true');              // don't read the seconds aloud
+      t.textContent = clock();
+      const tick = setInterval(() => {
+        if (my !== token) return clearInterval(tick);
+        t.textContent = clock();
+      }, 1000);
+      els.push(t);
+    } else {
+      state.holdStart = null;
+    }
+    let humanEl = null;
+    if (node.human) {
+      humanEl = document.createElement('p');
+      humanEl.className = 'human';
+      humanEl.append(...node.human);
+      els.push(humanEl);
+    }
+    (node.options || []).forEach(([text, next, key], i) => {
+      key = key || String(i + 1);
+      const b = document.createElement('button');
+      b.className = 'opt';
+      const [pre, post = ''] = text.split('{n}');          // the key is drawn as a keycap
+      const cap = document.createElement('kbd');
+      cap.textContent = key;
+      b.append(pre, cap, post);
+      b.addEventListener('click', (e) => { e.stopPropagation(); choose(next, key); });
+      keys.set(key, next);
+      els.push(b);
+    });
+    ivr.replaceChildren(...els);
+
+    // Lines arrive one at a time, like a recording; the options land together.
+    const lineCount = (node.lines || []).length;
+    let shown = 0, timer = 0, beat = !!humanEl;
+    const done = () => {
+      finish = null;
+      if (node.auto) setTimeout(() => { if (my === token) go(node.auto[0]); }, node.auto[1]);
+    };
+    const reveal = () => {
+      if (my !== token) return;
+      if (shown < lineCount) {
+        const line = els[shown++];
+        line.classList.add('in');
+        let pause = linePause(line.textContent);
+        if (shown === lineCount && beat) {                // last line of the recording: the music trails off
+          pause += BEAT_MS;                               // through the silence and is gone as Henry speaks
+          setQuiet(true, pause / 1000);
+        }
+        timer = setTimeout(reveal, pause);
+      } else if (beat) {                                  // the punchline gets a moment, then Henry answers
+        beat = false;
+        humanEl.classList.add('in');
+        timer = setTimeout(reveal, LINE_MS);
+      } else {
+        for (const el of els) el.classList.add('in');
+        if (humanEl) setQuiet(true, SKIP_FADE_S);         // skipped ahead: still fade, just faster
+        if (name !== 'start') document.body.classList.add('called');   // the way out shows once the first menu is fully on screen
+        done();
+      }
+    };
+    // an impatient press skips to the end of the recording
+    finish = () => { clearTimeout(timer); shown = lineCount; beat = false; reveal(); };
+    void ivr.offsetWidth;                                 // so the first line fades in too
+    reveal();
+  }
+
+  function choose(next, key) {
+    music.arm();                                          // the first press starts the hold music
+    go(next, key);
+  }
+
+  addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.key === 'Tab') return;
+    if (e.target.closest('a, button') && (e.key === 'Enter' || e.key === ' ')) return;
+    if (keys.has(e.key)) { e.preventDefault(); choose(keys.get(e.key), e.key); }
+    else if (finish && e.key.length === 1) finish();
+  });
+  addEventListener('click', (e) => {
+    if (finish && !e.target.closest('a, button')) finish();
+  });
+
+  go('start');
+})();
+</script>
+</body>
+</html>
