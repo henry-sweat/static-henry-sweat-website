@@ -1,0 +1,9 @@
+{
+  "name": "static-henry-sweat-website",
+  "version": "1.0.0",
+  "description": "Personal website for Henry Sweat",
+  "private": true,
+  "dependencies": {
+    "@vercel/analytics": "^1.4.1"
+  }
+}
